@@ -34,7 +34,6 @@ function! s:FindCurrentLine(lines)
         endif
     endfor
 
-    call ave#Assert(0)
     return ''
 endfunction
 
