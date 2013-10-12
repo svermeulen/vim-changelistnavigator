@@ -41,6 +41,12 @@ function! s:NavigateChangeList(forward)
 
     let changes = s:GetChanges()
     let lines = split(changes, '\n')
+    let numLines = len(lines)
+
+    if numLines == 2 && lines[numLines-1] == '>'
+        echo 'Change list is empty'
+        return
+    endif
 
     let currentLine = s:FindCurrentLine(lines)
     let lineNo = line('.')
