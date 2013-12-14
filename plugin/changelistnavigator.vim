@@ -67,6 +67,7 @@ function! s:NavigateChangeList(forward)
             echo "At " . (a:forward ? "start" : "end") . " of changelist"
         endtry
     else
+        normal! m`
         call setpos('.', currentLine)
     endif
 endfunction
