@@ -1,5 +1,5 @@
 
-function! s:GetChanges()
+function! g:GetChanges()
     set nomore
     redir => changesStr
     silent changes
@@ -8,9 +8,15 @@ function! s:GetChanges()
     return changesStr
 endfunction
 
-function! s:ParseLine(lineStr)
+function! g:ParseLine(lineStr)
 
-    let vars = split(a:lineStr, '\v\s+')
+    let lineStr = a:lineStr
+
+    if lineStr =~# '\v^\>'
+        let lineStr = strpart(lineStr, 1)
+    endif
+
+    let vars = split(lineStr, '\v\s+')
 
     let lineNo = vars[1]
     let colNo = vars[2]
@@ -19,60 +25,153 @@ function! s:ParseLine(lineStr)
     return [bufnum, lineNo, colNo, 0]
 endfunction
 
-function! s:FindCurrentLine(lines)
+function! g:IsValidPos(pos)
+    let lineNo = a:pos[1]
 
-    let numLines = len(a:lines)
-
-    if a:lines[numLines-1] == '>'
-        return s:ParseLine(a:lines[numLines-2])
+    if lineNo <= 0
+        return 0
     endif
 
-    for line in a:lines
-        if line =~ '\v^\>'
-            let line = strpart(line, 1)
-            return s:ParseLine(line)
+    if lineNo > line('$')
+        return 0
+    endif
+
+    let lineStr = getline(lineNo)
+
+    let colNo = a:pos[2]
+
+    if colNo >= len(lineStr)
+        return 0
+    endif
+
+    if colNo < 0
+        return 0
+    endif
+
+    return 1
+endfunction
+
+function! g:GetChangeData()
+
+    let currentChangePosIndex = -1
+    let changes = g:GetChanges()
+    let changeData = []
+
+    for line in split(changes, '\n')
+        if line !~# '-invalid-' && line !~# '\vchange.*line.*col.*text'
+
+            let wasAdded = 0
+
+            if line ==# '>'
+                let isLineCurrent = 1
+            else
+                let isLineCurrent = (line =~# '\v^\>')
+                let changePos = g:ParseLine(line)
+
+                if g:IsValidPos(changePos)
+                    let alreadyHaveLine = 0
+
+                    for lineData in changeData
+                        if lineData.pos[1] == changePos[1]
+                            let alreadyHaveLine = 1
+                            break
+                        endif
+                    endfor
+
+                    if !alreadyHaveLine
+                        if isLineCurrent
+                            let currentChangePosIndex = len(changeData)
+                        endif
+
+                        let data = {'line':line, 'pos':changePos}
+                        call add(changeData, data)
+                        let wasAdded = 1
+                    endif
+                endif
+            endif
+
+            if !wasAdded
+                if isLineCurrent
+                    if len(changeData) == 0
+                        let currentChangePosIndex = 0
+                    else
+                        let currentChangePosIndex = len(changeData)-1
+                    endif
+                endif
+            endif
         endif
     endfor
 
-    return ''
+    return [changeData, currentChangePosIndex]
 endfunction
 
-function! s:NavigateChangeList(forward)
+function! g:NavigateChangeList(forward)
 
-    let changes = s:GetChanges()
-    let lines = split(changes, '\n')
-    let numLines = len(lines)
+    let [changeData, currentChangePosIndex] = g:GetChangeData()
 
-    if numLines == 2 && lines[numLines-1] == '>'
-        echo 'Change list is empty'
+    "for data in changeData
+        "echom string(data)
+    "endfor
+
+    let numLines = len(changeData)
+
+    if numLines == 0 || (numLines == 1 && changeData[0].line ==# '>')
+        echom 'Change list is empty'
         return
     endif
 
-    let currentLine = s:FindCurrentLine(lines)
+    if currentChangePosIndex == -1
+        echoerr "Could not find current change number"
+        return
+    endif
+
+    let currentChangePos = changeData[currentChangePosIndex].pos
+
     let lineNo = line('.')
 
-    if lineNo == currentLine[1]
-        try
-            " Don't care about changes that occur within the same line
-            while line('.') == lineNo
+    if lineNo == currentChangePos[1]
 
+        if a:forward
+            if currentChangePosIndex+1 >= len(changeData)
+                echo "Reached end of change list"
+                return
+            endif
+
+            let goalPos = changeData[currentChangePosIndex+1].pos
+        else
+            if currentChangePosIndex <= 0
+                echo "Reached beginning of change list"
+                return
+            endif
+
+            let goalPos = changeData[currentChangePosIndex-1].pos
+        endif
+
+        let failed = 0
+        while line('.') != goalPos[1] || col('.')-1 != goalPos[2]
+
+            try
                 if a:forward
                     normal! g,
                 else
                     normal! g;
                 endif
-            endwhile
+            catch /.*/
+                let failed = 1
+                break
+            endtry
+        endwhile
 
-        catch /.*/
-            echo "At " . (a:forward ? "start" : "end") . " of changelist"
-        endtry
+        if failed
+            echoerr "Failure occurred while trying to find goal line"
+        endif
     else
         normal! m`
-        call setpos('.', currentLine)
+        call setpos('.', currentChangePos)
     endif
 endfunction
 
-nnoremap <silent> <plug>NavigateChangeListForward :call <sid>NavigateChangeList(0)<cr>
-nnoremap <silent> <plug>NavigateChangeListBackward :call <sid>NavigateChangeList(1)<cr>
+nnoremap <silent> <plug>NavigateChangeListForward :call g:NavigateChangeList(0)<cr>
+nnoremap <silent> <plug>NavigateChangeListBackward :call g:NavigateChangeList(1)<cr>
 
 
